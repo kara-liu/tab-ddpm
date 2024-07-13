@@ -598,6 +598,7 @@ class GaussianMultinomialDiffusion(torch.nn.Module):
         
         x_num_t = x_num
         log_x_cat_t = x_cat
+        
         if x_num.shape[1] > 0:
             noise = torch.randn_like(x_num)
             x_num_t = self.gaussian_q_sample(x_num, t, noise=noise)
@@ -615,7 +616,10 @@ class GaussianMultinomialDiffusion(torch.nn.Module):
 
         model_out_num = model_out[:, :self.num_numerical_features]
         model_out_cat = model_out[:, self.num_numerical_features:]
-
+        # print(model_out_num.mean(), model_out_cat.mean())
+        # import random 
+        # if random.random() < .2:
+        #     import ipdb; ipdb.set_trace()
         loss_multi = torch.zeros((1,)).float()
         loss_gauss = torch.zeros((1,)).float()
         if x_cat.shape[1] > 0:
@@ -894,12 +898,15 @@ class GaussianMultinomialDiffusion(torch.nn.Module):
             uniform_logits = torch.zeros((b, len(self.num_classes_expanded)), device=device)
             log_z = self.log_sample_categorical(uniform_logits)
 
-        y = torch.multinomial(
-            y_dist,
-            num_samples=b,
-            replacement=True
-        )
-        out_dict = {'y': y.long().to(device)}
+        if y_dist is None:
+            out_dict = {'y': None}
+        else:
+            y = torch.multinomial(
+                y_dist,
+                num_samples=b,
+                replacement=True
+            )
+            out_dict = {'y': y.long().to(device)}
         for i in reversed(range(0, self.num_timesteps)):
             print(f'Sample timestep {i:4d}', end='\r')
             t = torch.full((b,), i, device=device, dtype=torch.long)
@@ -924,7 +931,7 @@ class GaussianMultinomialDiffusion(torch.nn.Module):
     
 
     @torch.no_grad()
-    def sample(self, num_samples, y_dist):
+    def sample(self, num_samples, y_dist=None):
         b = num_samples
         device = self.log_alpha.device
         z_norm = torch.randn((b, self.num_numerical_features), device=device)
@@ -934,13 +941,15 @@ class GaussianMultinomialDiffusion(torch.nn.Module):
         if has_cat:
             uniform_logits = torch.zeros((b, len(self.num_classes_expanded)), device=device)
             log_z = self.log_sample_categorical(uniform_logits)
-
-        y = torch.multinomial(
-            y_dist,
-            num_samples=b,
-            replacement=True
-        )
-        out_dict = {'y': y.long().to(device)}
+        if y_dist is None:
+            out_dict = {'y': None}
+        else:
+            y = torch.multinomial(
+                y_dist,
+                num_samples=b,
+                replacement=True
+            )
+            out_dict = {'y': y.long().to(device)}
         for i in reversed(range(0, self.num_timesteps)):
             print(f'Sample timestep {i:4d}', end='\r')
             t = torch.full((b,), i, device=device, dtype=torch.long)
@@ -963,7 +972,7 @@ class GaussianMultinomialDiffusion(torch.nn.Module):
         sample = torch.cat([z_norm, z_cat], dim=1).cpu()
         return sample, out_dict
     
-    def sample_all(self, num_samples, batch_size, y_dist, ddim=False):
+    def sample_all(self, num_samples, batch_size, y_dist=None, ddim=False):
         if ddim:
             print('Sample using DDIM.')
             sample_fn = self.sample_ddim
@@ -979,15 +988,15 @@ class GaussianMultinomialDiffusion(torch.nn.Module):
             sample, out_dict = sample_fn(b, y_dist)
             mask_nan = torch.any(sample.isnan(), dim=1)
             sample = sample[~mask_nan]
-            out_dict['y'] = out_dict['y'][~mask_nan]
+            # out_dict['y'] = out_dict['y'][~mask_nan]
 
             all_samples.append(sample)
-            all_y.append(out_dict['y'].cpu())
+            # all_y.append(out_dict['y'].cpu())
             if sample.shape[0] != b:
                 raise FoundNANsError
             num_generated += sample.shape[0]
 
         x_gen = torch.cat(all_samples, dim=0)[:num_samples]
-        y_gen = torch.cat(all_y, dim=0)[:num_samples]
+        # y_gen = torch.cat(all_y, dim=0)[:num_samples]
 
-        return x_gen, y_gen
+        return x_gen #, y_gen

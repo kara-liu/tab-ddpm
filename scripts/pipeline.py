@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import zero
 import lib
 import torch
-
+import wandb 
 def load_config(path) :
     with open(path, 'rb') as f:
         return tomli.load(f)
@@ -32,9 +32,16 @@ def main():
     parser.add_argument('--sample', action='store_true',  default=False)
     parser.add_argument('--eval', action='store_true',  default=False)
     parser.add_argument('--change_val', action='store_true',  default=False)
+    parser.add_argument('--use_g1d_code', action='store_true',  default=False)
+    parser.add_argument('-n_num', type=int, default=-1)
+    parser.add_argument('-n_cat', type=int, default=-1)
 
     args = parser.parse_args()
     raw_config = lib.load_config(args.config)
+    raw_config['n_num'] = args.n_num
+    raw_config['n_cat'] = args.n_cat
+    raw_config['use_g1d'] = args.use_g1d_code
+
     if 'device' in raw_config:
         device = torch.device(raw_config['device'])
     else:
@@ -45,6 +52,8 @@ def main():
     save_file(os.path.join(raw_config['parent_dir'], 'config.toml'), args.config)
 
     if args.train:
+        wandb.init(project="sbias_ukbb_synthetic",
+            config=raw_config)
         train(
             **raw_config['train']['main'],
             **raw_config['diffusion_params'],
@@ -53,11 +62,17 @@ def main():
             model_type=raw_config['model_type'],
             model_params=raw_config['model_params'],
             T_dict=raw_config['train']['T'],
-            num_numerical_features=raw_config['num_numerical_features'],
             device=device,
-            change_val=args.change_val
+            change_val=args.change_val,
+            n_num=args.n_num,
+            n_cat=args.n_cat,
+            use_g1d_code=args.use_g1d_code
         )
     if args.sample:
+        if args.use_g1d_code:
+            f = '_use_g1d'
+        else:
+            f=''
         sample(
             num_samples=raw_config['sample']['num_samples'],
             batch_size=raw_config['sample']['batch_size'],
@@ -65,14 +80,16 @@ def main():
             **raw_config['diffusion_params'],
             parent_dir=raw_config['parent_dir'],
             real_data_path=raw_config['real_data_path'],
-            model_path=os.path.join(raw_config['parent_dir'], 'model.pt'),
+            model_path=os.path.join(raw_config['parent_dir'], f'model{f}.pt'),
             model_type=raw_config['model_type'],
             model_params=raw_config['model_params'],
             T_dict=raw_config['train']['T'],
-            num_numerical_features=raw_config['num_numerical_features'],
             device=device,
             seed=raw_config['sample'].get('seed', 0),
-            change_val=args.change_val
+            change_val=args.change_val,
+            n_num=args.n_num,
+            n_cat=args.n_cat,
+            use_g1d_code=args.use_g1d_code
         )
 
     save_file(os.path.join(raw_config['parent_dir'], 'info.json'), os.path.join(raw_config['real_data_path'], 'info.json'))

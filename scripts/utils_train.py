@@ -39,23 +39,33 @@ def make_dataset(
     T: lib.Transformations,
     num_classes: int,
     is_y_cond: bool,
-    change_val: bool
+    change_val: bool,
+    n_cat: int = -1,
+    n_num: int = -1, 
 ):
+    #num_classes doesn't matter to me!!
     # classification
     if num_classes > 0:
         X_cat = {} if os.path.exists(os.path.join(data_path, 'X_cat_train.npy')) or not is_y_cond else None
         X_num = {} if os.path.exists(os.path.join(data_path, 'X_num_train.npy')) else None
         y = {} 
 
-        for split in ['train', 'val', 'test']:
-            X_num_t, X_cat_t, y_t = lib.read_pure_data(data_path, split)
+        # for split in ['train', 'val', 'test']:
+        for split in ['train', 'val']:
+            # X_num_t, X_cat_t, y_t = lib.read_pure_data(data_path, split)
+            X_num_t, X_cat_t = lib.read_pure_data(data_path, split)
+            if n_cat != -1:
+                X_cat_t = X_cat_t[:, :n_cat]
+            if n_num != -1:
+                X_num_t = X_num_t[:, :n_num]
+            
             if X_num is not None:
                 X_num[split] = X_num_t
-            if not is_y_cond:
-                X_cat_t = concat_y_to_X(X_cat_t, y_t)
+            # if not is_y_cond:
+            #     X_cat_t = concat_y_to_X(X_cat_t, y_t)
             if X_cat is not None:
                 X_cat[split] = X_cat_t
-            y[split] = y_t
+            # y[split] = y_t
     else:
         # regression
         X_cat = {} if os.path.exists(os.path.join(data_path, 'X_cat_train.npy')) else None
@@ -77,8 +87,8 @@ def make_dataset(
     D = lib.Dataset(
         X_num,
         X_cat,
-        y,
-        y_info={},
+        # y,
+        # y_info={},
         task_type=lib.TaskType(info['task_type']),
         n_classes=info.get('n_classes')
     )
