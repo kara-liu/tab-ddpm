@@ -42,12 +42,14 @@ def make_dataset(
     change_val: bool,
     n_cat: int = -1,
     n_num: int = -1, 
+    weight_by: str = '',
+
 ):
     #num_classes doesn't matter to me!!
     # classification
     if num_classes > 0:
-        X_cat = {} if os.path.exists(os.path.join(data_path, 'X_cat_train.npy')) or not is_y_cond else None
-        X_num = {} if os.path.exists(os.path.join(data_path, 'X_num_train.npy')) else None
+        X_cat = {} if os.path.exists(os.path.join(data_path, 'X_cat_train_fltr.npy')) or not is_y_cond else None
+        X_num = {} if os.path.exists(os.path.join(data_path, 'X_num_train_fltr.npy')) else None
         y = {} 
 
         # for split in ['train', 'val', 'test']:
@@ -83,10 +85,21 @@ def make_dataset(
             y[split] = y_t
 
     info = lib.load_json(os.path.join(data_path, 'info.json'))
+    
+    n = X_num['train'].shape[0]
+    if weight_by != '':
+        wdir = '/oak/stanford/groups/rbaltman/karaliu/selection_bias/run_baselines/weights/'
+        weights = np.load(f'{wdir}/{weight_by}_train.npy') 
+    else:  
+        weights = np.ones(n)
 
+    # weights = weights / weights.sum()
+    assert len(weights) == n
+    
     D = lib.Dataset(
         X_num,
         X_cat,
+        weights, 
         # y,
         # y_info={},
         task_type=lib.TaskType(info['task_type']),

@@ -58,8 +58,9 @@ def get_category_sizes(X: Union[torch.Tensor, np.ndarray]) -> List[int]:
 class Dataset:
     X_num: Optional[ArrayDict]
     X_cat: Optional[ArrayDict]
-    y: ArrayDict
-    y_info: Dict[str, Any]
+    weights: np.ndarray #np array
+    # y: ArrayDict
+    # y_info: Dict[str, Any]
     task_type: TaskType
     n_classes: Optional[int]
 
@@ -69,20 +70,23 @@ class Dataset:
         splits = [k for k in ['train', 'val', 'test'] if dir_.joinpath(f'y_{k}.npy').exists()]
 
         def load(item) -> ArrayDict:
-            return {
-                x: cast(np.ndarray, np.load(dir_ / f'{item}_{x}.npy', allow_pickle=True))  # type: ignore[code]
+            dct = {
+                x: cast(np.ndarray, np.load(dir_ / f'{item}_{x}_fltr.npy', allow_pickle=True))  # type: ignore[code]
                 for x in splits
             }
+            dct['w'] = weights
+            return dct
 
         if Path(dir_ / 'info.json').exists():
             info = util.load_json(dir_ / 'info.json')
         else:
             info = None
         return Dataset(
-            load('X_num') if dir_.joinpath('X_num_train.npy').exists() else None,
-            load('X_cat') if dir_.joinpath('X_cat_train.npy').exists() else None,
-            load('y'),
-            {},
+            load('X_num') if dir_.joinpath('X_num_train_fltr.npy').exists() else None,
+            load('X_cat') if dir_.joinpath('X_cat_train_fltr.npy').exists() else None,
+            weights,
+            # load('y'),
+            # {},
             TaskType(info['task_type']),
             info.get('n_classes'),
         )
@@ -172,37 +176,37 @@ def change_val(dataset: Dataset, val_size: float = 0.2):
 
     return dataset
 
-def num_process_nans(dataset: Dataset, policy: Optional[NumNanPolicy]) -> Dataset:
-    assert dataset.X_num is not None
-    nan_masks = {k: np.isnan(v) for k, v in dataset.X_num.items()}
-    if not any(x.any() for x in nan_masks.values()):  # type: ignore[code]
-        assert policy is None
-        return dataset
+# def num_process_nans(dataset: Dataset, policy: Optional[NumNanPolicy]) -> Dataset:
+#     assert dataset.X_num is not None
+#     nan_masks = {k: np.isnan(v) for k, v in dataset.X_num.items()}
+#     if not any(x.any() for x in nan_masks.values()):  # type: ignore[code]
+#         assert policy is None
+#         return dataset
 
-    assert policy is not None
-    if policy == 'drop-rows':
-        valid_masks = {k: ~v.any(1) for k, v in nan_masks.items()}
-        assert valid_masks[
-            'test'
-        ].all(), 'Cannot drop test rows, since this will affect the final metrics.'
-        new_data = {}
-        for data_name in ['X_num', 'X_cat', 'y']:
-            data_dict = getattr(dataset, data_name)
-            if data_dict is not None:
-                new_data[data_name] = {
-                    k: v[valid_masks[k]] for k, v in data_dict.items()
-                }
-        dataset = replace(dataset, **new_data)
-    elif policy == 'mean':
-        new_values = np.nanmean(dataset.X_num['train'], axis=0)
-        X_num = deepcopy(dataset.X_num)
-        for k, v in X_num.items():
-            num_nan_indices = np.where(nan_masks[k])
-            v[num_nan_indices] = np.take(new_values, num_nan_indices[1])
-        dataset = replace(dataset, X_num=X_num)
-    else:
-        assert util.raise_unknown('policy', policy)
-    return dataset
+#     assert policy is not None
+#     if policy == 'drop-rows':
+#         valid_masks = {k: ~v.any(1) for k, v in nan_masks.items()}
+#         assert valid_masks[
+#             'test'
+#         ].all(), 'Cannot drop test rows, since this will affect the final metrics.'
+#         new_data = {}
+#         for data_name in ['X_num', 'X_cat', 'y']:
+#             data_dict = getattr(dataset, data_name)
+#             if data_dict is not None:
+#                 new_data[data_name] = {
+#                     k: v[valid_masks[k]] for k, v in data_dict.items()
+#                 }
+#         dataset = replace(dataset, **new_data)
+#     elif policy == 'mean':
+#         new_values = np.nanmean(dataset.X_num['train'], axis=0)
+#         X_num = deepcopy(dataset.X_num)
+#         for k, v in X_num.items():
+#             num_nan_indices = np.where(nan_masks[k])
+#             v[num_nan_indices] = np.take(new_values, num_nan_indices[1])
+#         dataset = replace(dataset, X_num=X_num)
+#     else:
+#         assert util.raise_unknown('policy', policy)
+#     return dataset
 
 
 # Inspired by: https://github.com/yandex-research/rtdl/blob/a4c93a32b334ef55d2a0559a4407c8306ffeeaee/lib/data.py#L20
@@ -237,117 +241,117 @@ def normalize(
     return {k: normalizer.transform(v) for k, v in X.items()}
 
 
-def cat_process_nans(X: ArrayDict, policy: Optional[CatNanPolicy]) -> ArrayDict:
-    assert X is not None
-    nan_masks = {k: v == CAT_MISSING_VALUE for k, v in X.items()}
-    if any(x.any() for x in nan_masks.values()):  # type: ignore[code]
-        if policy is None:
-            X_new = X
-        elif policy == 'most_frequent':
-            imputer = SimpleImputer(missing_values=CAT_MISSING_VALUE, strategy=policy)  # type: ignore[code]
-            imputer.fit(X['train'])
-            X_new = {k: cast(np.ndarray, imputer.transform(v)) for k, v in X.items()}
-        else:
-            util.raise_unknown('categorical NaN policy', policy)
-    else:
-        assert policy is None
-        X_new = X
-    return X_new
+# def cat_process_nans(X: ArrayDict, policy: Optional[CatNanPolicy]) -> ArrayDict:
+#     assert X is not None
+#     nan_masks = {k: v == CAT_MISSING_VALUE for k, v in X.items()}
+#     if any(x.any() for x in nan_masks.values()):  # type: ignore[code]
+#         if policy is None:
+#             X_new = X
+#         elif policy == 'most_frequent':
+#             imputer = SimpleImputer(missing_values=CAT_MISSING_VALUE, strategy=policy)  # type: ignore[code]
+#             imputer.fit(X['train'])
+#             X_new = {k: cast(np.ndarray, imputer.transform(v)) for k, v in X.items()}
+#         else:
+#             util.raise_unknown('categorical NaN policy', policy)
+#     else:
+#         assert policy is None
+#         X_new = X
+#     return X_new
 
 
-def cat_drop_rare(X: ArrayDict, min_frequency: float) -> ArrayDict:
-    assert 0.0 < min_frequency < 1.0
-    min_count = round(len(X['train']) * min_frequency)
-    X_new = {x: [] for x in X}
-    for column_idx in range(X['train'].shape[1]):
-        counter = Counter(X['train'][:, column_idx].tolist())
-        popular_categories = {k for k, v in counter.items() if v >= min_count}
-        for part in X_new:
-            X_new[part].append(
-                [
-                    (x if x in popular_categories else CAT_RARE_VALUE)
-                    for x in X[part][:, column_idx].tolist()
-                ]
-            )
-    return {k: np.array(v).T for k, v in X_new.items()}
+# def cat_drop_rare(X: ArrayDict, min_frequency: float) -> ArrayDict:
+#     assert 0.0 < min_frequency < 1.0
+#     min_count = round(len(X['train']) * min_frequency)
+#     X_new = {x: [] for x in X}
+#     for column_idx in range(X['train'].shape[1]):
+#         counter = Counter(X['train'][:, column_idx].tolist())
+#         popular_categories = {k for k, v in counter.items() if v >= min_count}
+#         for part in X_new:
+#             X_new[part].append(
+#                 [
+#                     (x if x in popular_categories else CAT_RARE_VALUE)
+#                     for x in X[part][:, column_idx].tolist()
+#                 ]
+#             )
+#     return {k: np.array(v).T for k, v in X_new.items()}
 
 
-def cat_encode(
-    X: ArrayDict,
-    encoding: Optional[CatEncoding],
-    y_train: Optional[np.ndarray],
-    seed: Optional[int],
-    return_encoder : bool = False
-) -> Tuple[ArrayDict, bool, Optional[Any]]:  # (X, is_converted_to_numerical)
-    if encoding != 'counter':
-        y_train = None
+# def cat_encode(
+#     X: ArrayDict,
+#     encoding: Optional[CatEncoding],
+#     y_train: Optional[np.ndarray],
+#     seed: Optional[int],
+#     return_encoder : bool = False
+# ) -> Tuple[ArrayDict, bool, Optional[Any]]:  # (X, is_converted_to_numerical)
+#     if encoding != 'counter':
+#         y_train = None
 
-    # Step 1. Map strings to 0-based ranges
+#     # Step 1. Map strings to 0-based ranges
 
-    if encoding is None:
-        unknown_value = np.iinfo('int64').max - 3
-        oe = sklearn.preprocessing.OrdinalEncoder(
-            handle_unknown='use_encoded_value',  # type: ignore[code]
-            unknown_value=unknown_value,  # type: ignore[code]
-            dtype='int64',  # type: ignore[code]
-        ).fit(X['train'])
-        encoder = make_pipeline(oe)
-        encoder.fit(X['train'])
-        X = {k: encoder.transform(v) for k, v in X.items()}
-        max_values = X['train'].max(axis=0)
-        for part in X.keys():
-            if part == 'train': continue
-            for column_idx in range(X[part].shape[1]):
-                X[part][X[part][:, column_idx] == unknown_value, column_idx] = (
-                    max_values[column_idx] + 1
-                )
-        if return_encoder:
-            return (X, False, encoder)
-        return (X, False)
+#     if encoding is None:
+#         unknown_value = np.iinfo('int64').max - 3
+#         oe = sklearn.preprocessing.OrdinalEncoder(
+#             handle_unknown='use_encoded_value',  # type: ignore[code]
+#             unknown_value=unknown_value,  # type: ignore[code]
+#             dtype='int64',  # type: ignore[code]
+#         ).fit(X['train'])
+#         encoder = make_pipeline(oe)
+#         encoder.fit(X['train'])
+#         X = {k: encoder.transform(v) for k, v in X.items()}
+#         max_values = X['train'].max(axis=0)
+#         for part in X.keys():
+#             if part == 'train': continue
+#             for column_idx in range(X[part].shape[1]):
+#                 X[part][X[part][:, column_idx] == unknown_value, column_idx] = (
+#                     max_values[column_idx] + 1
+#                 )
+#         if return_encoder:
+#             return (X, False, encoder)
+#         return (X, False)
 
-    # Step 2. Encode.
+#     # Step 2. Encode.
 
-    elif encoding == 'one-hot':
-        ohe = sklearn.preprocessing.OneHotEncoder(
-            handle_unknown='ignore', sparse=False, dtype=np.float32 # type: ignore[code]
-        )
-        encoder = make_pipeline(ohe)
+#     elif encoding == 'one-hot':
+#         ohe = sklearn.preprocessing.OneHotEncoder(
+#             handle_unknown='ignore', sparse=False, dtype=np.float32 # type: ignore[code]
+#         )
+#         encoder = make_pipeline(ohe)
 
-        # encoder.steps.append(('ohe', ohe))
-        encoder.fit(X['train'])
-        X = {k: encoder.transform(v) for k, v in X.items()}
-    elif encoding == 'counter':
-        assert y_train is not None
-        assert seed is not None
-        loe = LeaveOneOutEncoder(sigma=0.1, random_state=seed, return_df=False)
-        encoder.steps.append(('loe', loe))
-        encoder.fit(X['train'], y_train)
-        X = {k: encoder.transform(v).astype('float32') for k, v in X.items()}  # type: ignore[code]
-        if not isinstance(X['train'], pd.DataFrame):
-            X = {k: v.values for k, v in X.items()}  # type: ignore[code]
-    else:
-        util.raise_unknown('encoding', encoding)
+#         # encoder.steps.append(('ohe', ohe))
+#         encoder.fit(X['train'])
+#         X = {k: encoder.transform(v) for k, v in X.items()}
+#     elif encoding == 'counter':
+#         assert y_train is not None
+#         assert seed is not None
+#         loe = LeaveOneOutEncoder(sigma=0.1, random_state=seed, return_df=False)
+#         encoder.steps.append(('loe', loe))
+#         encoder.fit(X['train'], y_train)
+#         X = {k: encoder.transform(v).astype('float32') for k, v in X.items()}  # type: ignore[code]
+#         if not isinstance(X['train'], pd.DataFrame):
+#             X = {k: v.values for k, v in X.items()}  # type: ignore[code]
+#     else:
+#         util.raise_unknown('encoding', encoding)
     
-    if return_encoder:
-        return X, True, encoder # type: ignore[code]
-    return (X, True)
+#     if return_encoder:
+#         return X, True, encoder # type: ignore[code]
+#     return (X, True)
 
 
-def build_target(
-    y: ArrayDict, policy: Optional[YPolicy], task_type: TaskType
-) -> Tuple[ArrayDict, Dict[str, Any]]:
-    info: Dict[str, Any] = {'policy': policy}
-    if policy is None:
-        pass
-    elif policy == 'default':
-        if task_type == TaskType.REGRESSION:
-            mean, std = float(y['train'].mean()), float(y['train'].std())
-            y = {k: (v - mean) / std for k, v in y.items()}
-            info['mean'] = mean
-            info['std'] = std
-    else:
-        util.raise_unknown('policy', policy)
-    return y, info
+# def build_target(
+#     y: ArrayDict, policy: Optional[YPolicy], task_type: TaskType
+# ) -> Tuple[ArrayDict, Dict[str, Any]]:
+#     info: Dict[str, Any] = {'policy': policy}
+#     if policy is None:
+#         pass
+#     elif policy == 'default':
+#         if task_type == TaskType.REGRESSION:
+#             mean, std = float(y['train'].mean()), float(y['train'].std())
+#             y = {k: (v - mean) / std for k, v in y.items()}
+#             info['mean'] = mean
+#             info['std'] = std
+#     else:
+#         util.raise_unknown('policy', policy)
+#     return y, info
 
 
 @dataclass(frozen=True)
@@ -389,14 +393,17 @@ def transform_dataset(
     else:
         cache_path = None
 
-    if dataset.X_num is not None:
-        dataset = num_process_nans(dataset, transformations.num_nan_policy)
+    # if dataset.X_num is not None:
+    #     dataset = num_process_nans(dataset, transformations.num_nan_policy)
 
     num_transform = None
     cat_transform = None
     X_num = dataset.X_num
-
     if X_num is not None and transformations.normalization is not None:
+        # X_cat_tr = X_num['train'][:, :-116]
+        # X_cat_val = X_num['val'][:, :-116]
+        # X_num['val'] = X_num['val'][:, -116:]
+        # X_num['train'] = X_num['train'][:, -116:]
         X_num, num_transform = normalize(
             X_num,
             transformations.normalization,
@@ -404,34 +411,38 @@ def transform_dataset(
             return_normalizer=True
         )
         num_transform = num_transform
-    
-    if dataset.X_cat is None:
-        assert transformations.cat_nan_policy is None
-        assert transformations.cat_min_frequency is None
-        # assert transformations.cat_encoding is None
-        X_cat = None
-    else:
-        X_cat = cat_process_nans(dataset.X_cat, transformations.cat_nan_policy)
-        if transformations.cat_min_frequency is not None:
-            X_cat = cat_drop_rare(X_cat, transformations.cat_min_frequency)
-        X_cat, is_num, cat_transform = cat_encode(
-            X_cat,
-            transformations.cat_encoding,
-            dataset.y['train'],
-            transformations.seed,
-            return_encoder=True
-        )
-        if is_num:
-            X_num = (
-                X_cat
-                if X_num is None
-                else {x: np.hstack([X_num[x], X_cat[x]]) for x in X_num}
-            )
-            X_cat = None
 
-    y, y_info = build_target(dataset.y, transformations.y_policy, dataset.task_type)
+        # X_num['val'] = np.concatenate([X_cat_val, X_num['val']], axis=1)
+        # X_num['train'] =np.concatenate([X_cat_tr, X_num['train']], axis=1)
 
-    dataset = replace(dataset, X_num=X_num, X_cat=X_cat, y=y, y_info=y_info)
+    # if dataset.X_cat is None:
+    #     assert transformations.cat_nan_policy is None
+    #     assert transformations.cat_min_frequency is None
+    #     # assert transformations.cat_encoding is None
+    #     X_cat = None
+    # else:
+    #     X_cat = cat_process_nans(dataset.X_cat, transformations.cat_nan_policy)
+    #     if transformations.cat_min_frequency is not None:
+    #         X_cat = cat_drop_rare(X_cat, transformations.cat_min_frequency)
+    #     X_cat, is_num, cat_transform = cat_encode(
+    #         X_cat,
+    #         transformations.cat_encoding,
+    #         dataset.y['train'],
+    #         transformations.seed,
+    #         return_encoder=True
+    #     )
+    #     if is_num:
+    #         X_num = (
+    #             X_cat
+    #             if X_num is None
+    #             else {x: np.hstack([X_num[x], X_cat[x]]) for x in X_num}
+    #         )
+    #         X_cat = None
+
+    # y, y_info = build_target(dataset.y, transformations.y_policy, dataset.task_type)
+    X_cat = dataset.X_cat 
+    # dataset = replace(dataset, X_num=X_num, X_cat=X_cat, y=y, y_info=y_info)
+    dataset = replace(dataset, X_num=X_num, X_cat=X_cat)
     dataset.num_transform = num_transform
     dataset.cat_transform = cat_transform
 
@@ -482,25 +493,26 @@ class TabDataset(torch.utils.data.Dataset):
         
         self.X_num = torch.from_numpy(dataset.X_num[split]) if dataset.X_num is not None else None
         self.X_cat = torch.from_numpy(dataset.X_cat[split]) if dataset.X_cat is not None else None
-        self.y = torch.from_numpy(dataset.y[split])
+        self.w = torch.from_numpy(dataset.w)
+        # self.y = torch.from_numpy(dataset.y[split])
 
         assert self.y is not None
         assert self.X_num is not None or self.X_cat is not None 
 
     def __len__(self):
-        return len(self.y)
+        return len(self.X_cat)
 
     def __getitem__(self, idx):
         out_dict = {
-            'y': self.y[idx].long() if self.y is not None else None,
+            'y': None #self.y[idx].long() if self.y is not None else None,
         }
-
+        w = self.w[idx]
         x = np.empty((0,))
         if self.X_num is not None:
             x = self.X_num[idx]
         if self.X_cat is not None:
             x = torch.cat([x, self.X_cat[idx]], dim=0)
-        return x.float(), out_dict
+        return x.float(), w.float(), out_dict
 
 def prepare_dataloader(
     dataset : Dataset,
@@ -602,8 +614,15 @@ def prepare_fast_dataloader(
             X = torch.from_numpy(D.X_cat[split]).float()
     else:
         X = torch.from_numpy(D.X_num[split]).float()
-    y = torch.from_numpy(D.y[split])
-    dataloader = FastTensorDataLoader(X, y, batch_size=batch_size, shuffle=(split=='train'))
+    
+    # y = torch.from_numpy(D.y[split])
+    if split == 'val':
+        weights = torch.from_numpy(np.ones(D.X_num[split].shape[0])).float()
+    else:
+        weights = torch.from_numpy(D.weights).float() 
+
+    dataloader = FastTensorDataLoader(X, weights, batch_size=batch_size, shuffle=(split=='train'))
+    # dataloader = FastTensorDataLoader(X, y, batch_size=batch_size, shuffle=(split=='train'))
     while True:
         yield from dataloader
 
@@ -616,8 +635,9 @@ def prepare_fast_torch_dataloader(
         X = torch.from_numpy(np.concatenate([D.X_num[split], D.X_cat[split]], axis=1)).float()
     else:
         X = torch.from_numpy(D.X_num[split]).float()
-    y = torch.from_numpy(D.y[split])
-    dataloader = FastTensorDataLoader(X, y, batch_size=batch_size, shuffle=(split=='train'))
+    # y = torch.from_numpy(D.y[split])
+    # dataloader = FastTensorDataLoader(X, y, batch_size=batch_size, shuffle=(split=='train'))
+    dataloader = FastTensorDataLoader(X, batch_size=batch_size, shuffle=(split=='train'))
     return dataloader
 
 def round_columns(X_real, X_synth, columns):
@@ -651,33 +671,34 @@ def concat_features(D : Dataset):
 
     return X
 
-def concat_to_pd(X_num, X_cat, y):
+# def concat_to_pd(X_num, X_cat, y):
+def concat_to_pd(X_num, X_cat):
     if X_num is None:
         return pd.concat([
             pd.DataFrame(X_cat, columns=list(range(X_cat.shape[1]))),
-            pd.DataFrame(y, columns=['y'])
+            # pd.DataFrame(y, columns=['y'])
         ], axis=1)
     if X_cat is not None:
         return pd.concat([
             pd.DataFrame(X_num, columns=list(range(X_num.shape[1]))),
             pd.DataFrame(X_cat, columns=list(range(X_num.shape[1], X_num.shape[1] + X_cat.shape[1]))),
-            pd.DataFrame(y, columns=['y'])
+            # pd.DataFrame(y, columns=['y'])
         ], axis=1)
     return pd.concat([
             pd.DataFrame(X_num, columns=list(range(X_num.shape[1]))),
-            pd.DataFrame(y, columns=['y'])
+            # pd.DataFrame(y, columns=['y'])
         ], axis=1)
 
 def read_pure_data(path, split='train'):
-    y = np.load(os.path.join(path, f'y_{split}.npy'), allow_pickle=True)
+    # y = np.load(os.path.join(path, f'y_{split}.npy'), allow_pickle=True)
     X_num = None
     X_cat = None
-    if os.path.exists(os.path.join(path, f'X_num_{split}.npy')):
-        X_num = np.load(os.path.join(path, f'X_num_{split}.npy'), allow_pickle=True)
-    if os.path.exists(os.path.join(path, f'X_cat_{split}.npy')):
-        X_cat = np.load(os.path.join(path, f'X_cat_{split}.npy'), allow_pickle=True)
+    if os.path.exists(os.path.join(path, f'X_num_{split}_fltr.npy')):
+        X_num = np.load(os.path.join(path, f'X_num_{split}_fltr.npy'), allow_pickle=True)
+    if os.path.exists(os.path.join(path, f'X_cat_{split}_fltr.npy')):
+        X_cat = np.load(os.path.join(path, f'X_cat_{split}_fltr.npy'), allow_pickle=True)
 
-    return X_num, X_cat, y
+    return X_num, X_cat#, y
 
 def read_changed_val(path, val_size=0.2):
     path = Path(path)
@@ -713,6 +734,6 @@ def load_dataset_info(dataset_dir_name: str) -> Dict[str, Any]:
     path = Path("data/" + dataset_dir_name)
     info = util.load_json(path / 'info.json')
     info['size'] = info['train_size'] + info['val_size'] + info['test_size']
-    info['n_features'] = info['n_num_features'] + info['n_cat_features']
+    # info['n_features'] = info['n_num_features'] + info['n_cat_features']
     info['path'] = path
     return info

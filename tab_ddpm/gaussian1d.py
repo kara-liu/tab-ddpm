@@ -672,7 +672,7 @@ class GaussianDiffusion1D(Module):
             extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
 
-    def p_losses(self, x_start, t, noise = None):
+    def p_losses(self, x_start, t, weights, noise = None):
         # b, c, n = x_start.shape
         b = x_start.shape[0]
         noise = default(noise, lambda: torch.randn_like(x_start))
@@ -707,11 +707,14 @@ class GaussianDiffusion1D(Module):
 
         loss = F.mse_loss(model_out, target, reduction = 'none')
         loss = reduce(loss, 'b ... -> b', 'mean')
-
+        loss = loss * weights 
         loss = loss * extract(self.loss_weight, t, loss.shape)
         return loss.mean()
 
-    def forward(self, x):
+    def forward(self, x, weights):
+        """
+        weights for weighted loss 
+        """
         b = x.shape[0]
         # x = x[:, :self.seq_length]
         device = x.device
@@ -742,7 +745,7 @@ class GaussianDiffusion1D(Module):
         # model_out_cat = model_out[:, self.num_numerical_features:]
 
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
-        return self.p_losses(x, t)
+        return self.p_losses(x, t, weights=weights)
 
     def mixed_loss(self, x, ignore):
         return 0, self.forward(x)
@@ -755,6 +758,9 @@ class Trainer1D(object):
         diffusion_model: GaussianDiffusion1D,
         tr_loader,
         *,
+        num_transform, 
+        X_num_targ_mean_max, 
+        X_cat_targ_mean: np.ndarray, 
         train_batch_size = 16,
         gradient_accumulate_every = 1,
         train_lr = 1e-4,
@@ -768,12 +774,15 @@ class Trainer1D(object):
         amp = False,
         mixed_precision_type = 'fp16',
         split_batches = True,
-        max_grad_norm = 1.
+        max_grad_norm = 1.,
     ):
         super().__init__()
 
         # accelerator
-
+        print("Grad norm", max_grad_norm)
+        self.num_transform = num_transform
+        self.X_num_targ_mean, self.X_num_targ_max = X_num_targ_mean_max
+        self.X_cat_targ_mean = X_cat_targ_mean
         self.accelerator = Accelerator(
             split_batches = split_batches,
             mixed_precision = mixed_precision_type if amp else 'no'
@@ -789,11 +798,11 @@ class Trainer1D(object):
         assert has_int_squareroot(num_samples), 'number of samples must have an integer square root'
         self.num_samples = num_samples
         self.save_and_sample_every = save_and_sample_every
-        self.log_every = 500
-        self.print_every = 500
+        self.log_every = 5000
+        self.print_every = 5000
         self.ema_every = 1000
-        self.eval_every = 500
-        self.sample_every = 5000
+        self.eval_every = 1000
+        self.sample_every = 2500
         self.batch_size = train_batch_size
         self.gradient_accumulate_every = gradient_accumulate_every
         self.max_grad_norm = max_grad_norm
@@ -879,9 +888,11 @@ class Trainer1D(object):
                 total_loss = 0.
 
                 for _ in range(self.gradient_accumulate_every):
-                    data = next(self.dl)[0].to(device)
+                    data, weights = next(self.dl)
+                    data = data.to(device)
+                    weights = weights.to(device)
                     with self.accelerator.autocast():
-                        loss = self.model(data)
+                        loss = self.model(data, weights=weights)
                         loss = loss / self.gradient_accumulate_every
                         total_loss += loss.item()
 
@@ -927,11 +938,21 @@ class Trainer1D(object):
                 if (self.step + 1) % self.sample_every == 0:
                     self.model.eval()
                     X_gen = self.model.sample_all(2048, 1024, y_dist=None, ddim=False).numpy()
-                    X_num = X_gen[:, :self.model.num_numerical_features:]
-                    X_cat = X_gen[:, self.model.num_numerical_features:]
-                    # X_num = self.inverse_transform(X_num)
-                    print(f"Cat mean at step {self.step}: {X_cat[:,:5].mean(axis=0)}")
-                    print(f"Num mean at step {self.step}: {X_num[:,:5].mean(axis=0)}")
+                    n_num = self.model.num_numerical_features
+                    
+                    X_num = X_gen[:, :n_num]
+                    X_cat = X_gen[:, n_num:]
+                    n_cat = X_cat.shape[1]
+                    X_num = self.num_transform(X_num)
+                    X_num_mse_targ = np.mean((X_num.mean(axis=0) - self.X_num_targ_mean[:n_num])**2/self.X_num_targ_max[:n_num])
+                    X_cat_mse_targ = np.mean((X_cat.mean(axis=0) - self.X_cat_targ_mean[:n_cat])**2)
+
+                    print(f"Cat mean at step {self.step}: {X_cat[:,:5].mean(axis=0)} {self.X_cat_targ_mean[:min(5,n_cat)]}")
+                    print(f"Num mean at step {self.step}: {X_num[:,:5].mean(axis=0)} {self.X_num_targ_mean[:5]}")
+                    wandb.log({
+                        "X_num_mse_targ": X_num_mse_targ,
+                        "X_cat_mse_targ": X_cat_mse_targ,
+                    })
                     # print(f"Num unique at step {self.step}: {np.unique(X_num[:,0])}")
                     self.model.train()
 

@@ -36,8 +36,10 @@ def sample(
     n_num = -1, 
     n_cat = -1,
     use_g1d_code: bool = False,
+    weight_by: str = '',
+    wandb_name: str = ''
 ):
-
+    f = wandb_name
     use_g1d = use_g1d_code 
     zero.improve_reproducibility(seed)
 
@@ -157,11 +159,9 @@ def sample(
     #         X_gen[:, num_numerical_features:] = to_good_ohe(D.cat_transform.steps[0][1], X_num_[:, num_numerical_features:])
     #     X_cat = D.cat_transform.inverse_transform(X_gen[:, num_numerical_features:])
     # import ipdb; ipdb.set_trace()
-    f = ''
-    if use_g1d:
-        f = '_use_g1d'
+
     if num_numerical_features != 0:
-        import ipdb; ipdb.set_trace()
+        # import ipdb; ipdb.set_trace()
         np.save(os.path.join(parent_dir, f'X_num_train_raw{f}'), X_gen[:, :num_numerical_features])
         # _, normalize = lib.normalize({'train' : X_num_real}, T_dict['normalization'], T_dict['seed'], True)
         # np.save(os.path.join(parent_dir, 'X_num_unnorm'), X_gen[:, :num_numerical_features])

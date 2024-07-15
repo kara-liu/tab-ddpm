@@ -167,6 +167,8 @@ def train(
     n_num = -1, 
     n_cat = -1,
     use_g1d_code: bool = False,
+    weight_by: str = '',
+    wandb_name: str = ''
 ):
 
     use_g1d = use_g1d_code 
@@ -185,6 +187,7 @@ def train(
         change_val=change_val,
         n_num=n_num,
         n_cat=n_cat,
+        weight_by=weight_by
     )
 
     K = np.array(dataset.get_category_sizes('train'))
@@ -227,12 +230,24 @@ def train(
                     objective='pred_x0')
         diffusion.to(device)
         diffusion.eval()
-
+        if weight_by == '':
+            print("Setting source as .X_num_targ_mean!")
+            X_num_targ_mean = np.load('/oak/stanford/groups/rbaltman/karaliu/tab-ddpm/data/Xs_num_mean.npy')
+            X_num_targ_max = np.load('/oak/stanford/groups/rbaltman/karaliu/tab-ddpm/data/Xs_num_max.npy')
+            X_cat_targ_mean = np.load('/oak/stanford/groups/rbaltman/karaliu/tab-ddpm/data/Xs_cat_mean.npy')
+        else:
+            print("Setting target as .X_num_targ_mean!")
+            X_num_targ_mean = np.load('/oak/stanford/groups/rbaltman/karaliu/tab-ddpm/data/Xt_num_mean.npy')
+            X_num_targ_max = np.load('/oak/stanford/groups/rbaltman/karaliu/tab-ddpm/data/Xt_num_max.npy')
+            X_cat_targ_mean = np.load('/oak/stanford/groups/rbaltman/karaliu/tab-ddpm/data/Xt_cat_mean.npy')
+        
         trainer = Trainer1D(diffusion_model=diffusion, tr_loader=train_loader, train_batch_size=batch_size,
-            train_num_steps=steps)
+            train_num_steps=steps, X_cat_targ_mean=X_cat_targ_mean,
+            X_num_targ_mean_max=(X_num_targ_mean, X_num_targ_max),
+            num_transform=dataset.num_transform.inverse_transform)
         trainer.train()
         wandb.finish()
-        torch.save(diffusion.model.state_dict(), os.path.join(parent_dir, 'model_use_g1d.pt'))
+        torch.save(diffusion.model.state_dict(), os.path.join(parent_dir, f'model{wandb_name}.pt'))
     else: 
         diffusion = GaussianMultinomialDiffusion(
             num_classes=K,
@@ -259,7 +274,7 @@ def train(
         trainer.run_loop()
         wandb.finish()
         # trainer.loss_history.to_csv(os.path.join(parent_dir, 'loss.csv'), index=False)
-        torch.save(diffusion._denoise_fn.state_dict(), os.path.join(parent_dir, 'model.pt'))
+        torch.save(diffusion._denoise_fn.state_dict(), os.path.join(parent_dir, f'model{weight_by}.pt'))
         torch.save(trainer.ema_model.state_dict(), os.path.join(parent_dir, 'model_ema.pt'))
 
 

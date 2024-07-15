@@ -33,7 +33,9 @@ def main():
     parser.add_argument('--eval', action='store_true',  default=False)
     parser.add_argument('--change_val', action='store_true',  default=False)
     parser.add_argument('--use_g1d_code', action='store_true',  default=False)
+    parser.add_argument('-weight_by', default='',  choices=['', 'kmm', 'kliep', 'iw', 'ipw'])
     parser.add_argument('-n_num', type=int, default=-1)
+    parser.add_argument('-wandb_name', type=str, default=None)
     parser.add_argument('-n_cat', type=int, default=-1)
 
     args = parser.parse_args()
@@ -53,6 +55,7 @@ def main():
 
     if args.train:
         wandb.init(project="sbias_ukbb_synthetic",
+            name = args.wandb_name, 
             config=raw_config)
         train(
             **raw_config['train']['main'],
@@ -66,7 +69,10 @@ def main():
             change_val=args.change_val,
             n_num=args.n_num,
             n_cat=args.n_cat,
-            use_g1d_code=args.use_g1d_code
+            use_g1d_code=args.use_g1d_code,
+            weight_by=args.weight_by,
+            wandb_name=args.wandb_name
+
         )
     if args.sample:
         if args.use_g1d_code:
@@ -80,7 +86,7 @@ def main():
             **raw_config['diffusion_params'],
             parent_dir=raw_config['parent_dir'],
             real_data_path=raw_config['real_data_path'],
-            model_path=os.path.join(raw_config['parent_dir'], f'model{f}.pt'),
+            model_path=os.path.join(raw_config['parent_dir'], f'model{args.wandb_name}.pt'),
             model_type=raw_config['model_type'],
             model_params=raw_config['model_params'],
             T_dict=raw_config['train']['T'],
@@ -89,7 +95,10 @@ def main():
             change_val=args.change_val,
             n_num=args.n_num,
             n_cat=args.n_cat,
-            use_g1d_code=args.use_g1d_code
+            use_g1d_code=args.use_g1d_code,
+            weight_by=args.weight_by,
+                        wandb_name=args.wandb_name
+
         )
 
     save_file(os.path.join(raw_config['parent_dir'], 'info.json'), os.path.join(raw_config['real_data_path'], 'info.json'))
